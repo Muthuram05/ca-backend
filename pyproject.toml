@@ -1,0 +1,10 @@
+[project]
+name = "reeldm-backend"
+version = "0.1.0"
+description = "Instagram reel comment-to-DM automation (API + webhook)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = "-q"

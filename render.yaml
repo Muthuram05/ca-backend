@@ -1,0 +1,22 @@
+# Render.com Blueprint: New > Blueprint > pick this repo. Free plan, Docker build.
+services:
+  - type: web
+    name: ca-backend
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: BASE_URL          # the FRONTEND's public URL, e.g. https://ca-frontend.netlify.app
+        sync: false
+      - key: IG_APP_ID
+        sync: false
+      - key: IG_APP_SECRET
+        sync: false
+      - key: DATABASE_URL      # Supabase "Transaction pooler" connection string
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: WEBHOOK_VERIFY_TOKEN
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
