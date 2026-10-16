@@ -122,6 +122,17 @@ class InstagramClient:
     # ---------- Account ----------
 
     def get_profile(self, token: str) -> dict:
+        try:
+            return self._get_profile(token)
+        except InstagramError as exc:
+            err = exc.error
+            log.warning(
+                "GET /me failed: HTTP %s, message=%r, type=%s, code=%s, subcode=%s, fbtrace_id=%s",
+                exc.status, str(exc), err.get("type"), err.get("code"), err.get("error_subcode"), err.get("fbtrace_id"),
+            )
+            raise
+
+    def _get_profile(self, token: str) -> dict:
         return self._request(
             "GET",
             f"{self.graph}/me",

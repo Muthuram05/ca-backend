@@ -111,6 +111,11 @@ def _long_lived_token(ctx: AppContext, token: str) -> dict:
 def connect_account(ctx: AppContext, code: str) -> Account:
     """Finishes Instagram login: code -> long-lived token -> profile -> webhook subscription."""
     short = ctx.ig.exchange_code(code)
+    t = str(short.get("access_token", ""))
+    log.info(
+        "Instagram login: user_id=%s permissions=%s token_prefix=%s token_len=%d",
+        short.get("user_id"), short.get("permissions"), t[:4], len(t),
+    )
     long = _long_lived_token(ctx, short["access_token"])
     token = long["access_token"]
     profile = ctx.ig.get_profile(token)
