@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 if __name__ == "__main__":
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx logs full request URLs at INFO, which would leak the app secret and access tokens
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     uvicorn.run(
         "app.main:create_app",
         factory=True,

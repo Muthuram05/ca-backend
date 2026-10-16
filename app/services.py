@@ -87,6 +87,7 @@ def handle_comment(ctx: AppContext, ig_user_id: str, comment: dict) -> None:
 def connect_account(ctx: AppContext, code: str) -> Account:
     """Finishes Instagram login: code -> long-lived token -> profile -> webhook subscription."""
     short = ctx.ig.exchange_code(code)
+    log.info("Short-lived token response fields: %s", sorted(short))
     long = ctx.ig.get_long_lived_token(short["access_token"])
     token = long["access_token"]
     profile = ctx.ig.get_profile(token)
