@@ -25,6 +25,15 @@ class InstagramError(Exception):
         self.status = status
         self.body = body or {}
 
+    @property
+    def error(self) -> dict:
+        err = self.body.get("error") if isinstance(self.body, dict) else None
+        return err if isinstance(err, dict) else {}
+
+    @property
+    def is_unsupported_request(self) -> bool:
+        return self.error.get("code") == 100 and "Unsupported request" in str(self)
+
 
 class InstagramClient:
     def __init__(self, settings: Settings, http: httpx.Client | None = None):
@@ -80,37 +89,27 @@ class InstagramClient:
     def get_long_lived_token(self, short_token: str) -> dict:
         """Short-lived -> long-lived token (valid 60 days). Returns access_token, expires_in.
 
-        Meta documents an unversioned GET, but that call sometimes fails with
-        "Unsupported request - method type: get", so we fall back to the versioned
-        path and to POST before giving up. Each failure is logged without secrets.
+        Business Login for Instagram can already hand out a long-lived token; Instagram then
+        rejects this exchange with code 100 "Unsupported request". Callers handle that case
+        (see services.connect_account); this method only logs the details, never the secret.
         """
-        params = {
-            "grant_type": "ig_exchange_token",
-            "client_secret": self.settings.ig_app_secret,
-            "access_token": short_token,
-        }
-        attempts = [
-            ("GET", "https://graph.instagram.com/access_token", {"params": params}),
-            ("GET", f"{self.graph}/access_token", {"params": params}),
-            ("POST", "https://graph.instagram.com/access_token", {"data": params}),
-        ]
-        last_exc: InstagramError | None = None
-        for method, url, kwargs in attempts:
-            try:
-                result = self._request(method, url, **kwargs)
-                if last_exc is not None:
-                    log.warning("Long-lived token exchange succeeded via %s %s", method, url)
-                return result
-            except InstagramError as exc:
-                err = exc.body.get("error") if isinstance(exc.body.get("error"), dict) else {}
-                log.warning(
-                    "Long-lived token exchange failed via %s %s: HTTP %s, message=%r, type=%s, code=%s, subcode=%s, fbtrace_id=%s",
-                    method, url, exc.status, str(exc), err.get("type"), err.get("code"),
-                    err.get("error_subcode"), err.get("fbtrace_id"),
-                )
-                last_exc = exc
-        assert last_exc is not None
-        raise last_exc
+        try:
+            return self._request(
+                "GET",
+                "https://graph.instagram.com/access_token",
+                params={
+                    "grant_type": "ig_exchange_token",
+                    "client_secret": self.settings.ig_app_secret,
+                    "access_token": short_token,
+                },
+            )
+        except InstagramError as exc:
+            err = exc.error
+            log.warning(
+                "Long-lived token exchange failed: HTTP %s, message=%r, type=%s, code=%s, subcode=%s, fbtrace_id=%s",
+                exc.status, str(exc), err.get("type"), err.get("code"), err.get("error_subcode"), err.get("fbtrace_id"),
+            )
+            raise
 
     def refresh_token(self, long_token: str) -> dict:
         """Extends a long-lived token by another 60 days (token must be at least 24h old)."""

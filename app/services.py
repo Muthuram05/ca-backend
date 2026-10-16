@@ -84,11 +84,34 @@ def handle_comment(ctx: AppContext, ig_user_id: str, comment: dict) -> None:
         db.commit()
 
 
+LONG_LIVED_TOKEN_SECONDS = 60 * 24 * 3600
+
+
+def _long_lived_token(ctx: AppContext, token: str) -> dict:
+    """Returns {"access_token", "expires_in"} for a token from Instagram login.
+
+    Business Login for Instagram may already return a long-lived token. Instagram then
+    rejects ig_exchange_token with code 100 "Unsupported request", so we keep the token we
+    have. If it turns out to be short-lived, get_profile() right after fails or the user
+    simply has to log in again; the daily refresh job extends it otherwise.
+    """
+    try:
+        return ctx.ig.get_long_lived_token(token)
+    except InstagramError as exc:
+        if not exc.is_unsupported_request:
+            raise
+    try:
+        # Confirms the token is long-lived and gives the real expiry (only works once it's 24h old)
+        return ctx.ig.refresh_token(token)
+    except InstagramError as exc:
+        log.info("Login token is not refreshable yet (%s); using it as the long-lived token", exc)
+    return {"access_token": token, "expires_in": LONG_LIVED_TOKEN_SECONDS}
+
+
 def connect_account(ctx: AppContext, code: str) -> Account:
     """Finishes Instagram login: code -> long-lived token -> profile -> webhook subscription."""
     short = ctx.ig.exchange_code(code)
-    log.info("Short-lived token response fields: %s", sorted(short))
-    long = ctx.ig.get_long_lived_token(short["access_token"])
+    long = _long_lived_token(ctx, short["access_token"])
     token = long["access_token"]
     profile = ctx.ig.get_profile(token)
     ig_user_id = str(profile.get("user_id") or profile["id"])

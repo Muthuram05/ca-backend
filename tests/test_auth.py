@@ -1,7 +1,7 @@
 from urllib.parse import parse_qs, urlparse
 
-from app.models import Account
-from conftest import APP_SCOPED_ID, IG_USER_ID, login, make_rule
+from app.models import Account, as_utc, utcnow
+from conftest import APP_SCOPED_ID, IG_USER_ID, login, make_rule, mock_login
 from test_security_config import signed_request
 
 
@@ -46,6 +46,53 @@ def test_login_again_updates_the_same_account(client, ig_mock, ctx):
         assert len(accounts) == 1
         assert accounts[0].username == "renamed"
         assert ctx.cipher.decrypt(accounts[0].access_token_encrypted) == "second"
+
+
+def test_login_keeps_business_login_token_when_exchange_is_unsupported(client, ig_mock, ctx):
+    """Business Login can return a long-lived token already; Instagram then rejects ig_exchange_token."""
+    mock_login(ig_mock)
+    unsupported = {"error": {"message": "Unsupported request - method type: get", "type": "IGApiException", "code": 100}}
+    ig_mock.get("https://graph.instagram.com/access_token").respond(400, json=unsupported)
+    ig_mock.get("https://graph.instagram.com/refresh_access_token").respond(
+        400, json={"error": {"message": "Session has not been active long enough", "code": 190}}
+    )
+    res = client.get("/auth/instagram", follow_redirects=False)
+    state = parse_qs(urlparse(res.headers["location"]).query)["state"][0]
+    res = client.get(f"/auth/instagram/callback?code=the-code%23_&state={state}", follow_redirects=False)
+    assert res.headers["location"] == "/"
+    assert client.get("/api/me").json()["username"] == "creator"
+    with ctx.sessions() as db:
+        account = db.get(Account, IG_USER_ID)
+        assert ctx.cipher.decrypt(account.access_token_encrypted) == "short-token"
+        days_left = (as_utc(account.token_expires_at) - utcnow()).days
+        assert 58 <= days_left <= 60
+
+
+def test_login_uses_refresh_expiry_when_exchange_is_unsupported(client, ig_mock, ctx):
+    mock_login(ig_mock)
+    unsupported = {"error": {"message": "Unsupported request - method type: get", "type": "IGApiException", "code": 100}}
+    ig_mock.get("https://graph.instagram.com/access_token").respond(400, json=unsupported)
+    ig_mock.get("https://graph.instagram.com/refresh_access_token").respond(
+        json={"access_token": "refreshed-token", "token_type": "bearer", "expires_in": 3600 * 24 * 30}
+    )
+    res = client.get("/auth/instagram", follow_redirects=False)
+    state = parse_qs(urlparse(res.headers["location"]).query)["state"][0]
+    client.get(f"/auth/instagram/callback?code=the-code&state={state}", follow_redirects=False)
+    with ctx.sessions() as db:
+        account = db.get(Account, IG_USER_ID)
+        assert ctx.cipher.decrypt(account.access_token_encrypted) == "refreshed-token"
+        assert 29 <= (as_utc(account.token_expires_at) - utcnow()).days <= 30
+
+
+def test_login_fails_on_other_exchange_errors(client, ig_mock):
+    mock_login(ig_mock)
+    ig_mock.get("https://graph.instagram.com/access_token").respond(
+        400, json={"error": {"message": "Error validating client secret", "code": 101}}
+    )
+    res = client.get("/auth/instagram", follow_redirects=False)
+    state = parse_qs(urlparse(res.headers["location"]).query)["state"][0]
+    res = client.get(f"/auth/instagram/callback?code=the-code&state={state}", follow_redirects=False)
+    assert "Error%20validating%20client%20secret" in res.headers["location"]
 
 
 def test_webhook_subscription_failure_still_logs_in_with_warning(client, ig_mock):

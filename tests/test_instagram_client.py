@@ -4,6 +4,8 @@ import pytest
 from app.config import Settings
 from app.instagram import InstagramClient, InstagramError
 
+UNSUPPORTED = {"error": {"message": "Unsupported request - method type: get", "type": "IGApiException", "code": 100}}
+
 
 def _settings() -> Settings:
     return Settings(
@@ -21,35 +23,27 @@ def _client(handler) -> InstagramClient:
     return InstagramClient(_settings(), http=httpx.Client(transport=httpx.MockTransport(handler)))
 
 
-UNSUPPORTED = {"error": {"message": "Unsupported request - method type: get", "type": "IGApiException", "code": 100}}
-
-
-def test_long_lived_token_uses_documented_get_first():
+def test_long_lived_token_uses_documented_get():
     calls = []
 
     def handler(req: httpx.Request):
-        calls.append((req.method, req.url.path))
+        calls.append((req.method, req.url.path, req.url.params["grant_type"]))
         return httpx.Response(200, json={"access_token": "long", "expires_in": 5184000})
 
     assert _client(handler).get_long_lived_token("short")["access_token"] == "long"
-    assert calls == [("GET", "/access_token")]
+    assert calls == [("GET", "/access_token", "ig_exchange_token")]
 
 
-def test_long_lived_token_falls_back_when_get_is_rejected():
-    calls = []
-
-    def handler(req: httpx.Request):
-        calls.append((req.method, req.url.path))
-        if req.method == "POST":
-            assert b"ig_exchange_token" in req.content
-            return httpx.Response(200, json={"access_token": "long", "expires_in": 5184000})
-        return httpx.Response(400, json=UNSUPPORTED)
-
-    assert _client(handler).get_long_lived_token("short")["access_token"] == "long"
-    assert calls == [("GET", "/access_token"), ("GET", "/v23.0/access_token"), ("POST", "/access_token")]
-
-
-def test_long_lived_token_raises_when_every_attempt_fails():
+def test_unsupported_request_is_recognised():
     client = _client(lambda req: httpx.Response(400, json=UNSUPPORTED))
-    with pytest.raises(InstagramError, match="Unsupported request"):
+    with pytest.raises(InstagramError) as info:
         client.get_long_lived_token("short")
+    assert info.value.is_unsupported_request
+    assert info.value.error["type"] == "IGApiException"
+
+
+def test_other_errors_are_not_unsupported_request():
+    body = {"error": {"message": "Error validating client secret", "type": "OAuthException", "code": 101}}
+    with pytest.raises(InstagramError) as info:
+        _client(lambda req: httpx.Response(400, json=body)).get_long_lived_token("short")
+    assert not info.value.is_unsupported_request
