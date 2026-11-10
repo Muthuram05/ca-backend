@@ -125,19 +125,32 @@ class InstagramClient:
         probes.append(f"{path} -> {str(body)[:200]}")
         return body
 
+    # The edges that can carry an Instagram account, newest naming first.
+    BUSINESS_IG_EDGES = ("owned_instagram_accounts", "client_instagram_accounts", "instagram_accounts")
+
+    def _business_account(self, probes: list, business_id: str, token: str) -> dict | None:
+        for edge in self.BUSINESS_IG_EDGES:
+            body = self._try(probes, f"{business_id}/{edge}", token, fields=self.IG_FIELDS)
+            accounts = (body or {}).get("data") or []
+            if accounts:
+                return accounts[0]
+        return None
+
     def get_profile(self, token: str) -> dict:
         """Find the Instagram account this token was granted.
 
         Facebook Login for Business hands back a token scoped to business assets
-        rather than to the Instagram user, so the account has to be discovered.
-        Which edge carries it depends on whether the Instagram account was
-        granted directly or through a linked Page, so both are tried; if neither
-        works the error carries what each probe returned, because a failure here
-        is only diagnosable from the live response.
+        rather than to the Instagram user, so the account has to be discovered,
+        and which edge carries it depends on how the account was granted. The
+        unified-login configuration can only request Instagram permissions, so
+        me/businesses is refused and the owning portfolio is invisible to the
+        token; settings.ig_business_id names it instead. Every probe is recorded
+        and reported on failure, because this step is only diagnosable from the
+        live response.
         """
         probes: list[str] = []
 
-        # Granted directly as a business asset.
+        # Granted directly as a business asset to the (system) user logging in.
         body = self._try(probes, "me/assigned_instagram_accounts", token, fields=self.IG_FIELDS)
         accounts = (body or {}).get("data") or []
         if accounts:
@@ -153,18 +166,26 @@ class InstagramClient:
             if account:
                 return account
 
-        # Owned by a business the token can see.
+        # Owned by, or shared with, a business the token can see.
         businesses = self._try(probes, "me/businesses", token, fields="id,name")
         for business in (businesses or {}).get("data") or []:
-            owned = self._try(
-                probes, f"{business['id']}/instagram_accounts", token, fields=self.IG_FIELDS
-            )
-            accounts = (owned or {}).get("data") or []
-            if accounts:
-                return accounts[0]
+            account = self._business_account(probes, business["id"], token)
+            if account:
+                return account
 
-        # Last resort: the token's own subject, in case it is the account.
-        body = self._try(probes, "me", token, fields="id,name")
+        # The configured business, for when me/businesses is refused.
+        if self.settings.ig_business_id:
+            account = self._business_account(probes, self.settings.ig_business_id, token)
+            if account:
+                return account
+
+        # Named outright, when nothing else can reach it.
+        if self.settings.ig_user_id:
+            account = self._try(probes, self.settings.ig_user_id, token, fields=self.IG_FIELDS)
+            if account and account.get("id"):
+                return account
+
+        self._try(probes, "me", token, fields="id,name")
         raise InstagramError(
             "Could not find an Instagram account for this login. Probes: " + " | ".join(probes)
         )
