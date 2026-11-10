@@ -12,8 +12,6 @@ services:
         sync: false
       - key: IG_APP_SECRET
         sync: false
-      - key: IG_CONFIG_ID    # Instagram use case > API setup with Unified login
-        sync: false
       - key: DATABASE_URL      # Supabase "Transaction pooler" connection string
         sync: false
       - key: TOKEN_ENCRYPTION_KEY
