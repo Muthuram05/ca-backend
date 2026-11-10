@@ -38,6 +38,12 @@ class Settings:
     # Fernet key used to encrypt Instagram access tokens at rest
     token_encryption_key: str
     database_url: str
+    # Optional. The login only grants Instagram permissions, never business_management,
+    # so me/businesses is refused and the owning portfolio cannot be discovered from the
+    # token. Naming it here lets the account be found through the business instead.
+    ig_business_id: str = ""
+    # Optional last resort: the Instagram user id to use when no probe finds one.
+    ig_user_id: str = ""
     graph_version: str = "v23.0"
     # Optional: folder with a built ca-frontend (npm run build) to serve from this same app
     frontend_dist: Path | None = None
@@ -74,6 +80,8 @@ class Settings:
             session_secret=env["SESSION_SECRET"],
             token_encryption_key=env["TOKEN_ENCRYPTION_KEY"],
             database_url=normalize_database_url(env["DATABASE_URL"]),
+            ig_business_id=env.get("IG_BUSINESS_ID") or "",
+            ig_user_id=env.get("IG_USER_ID") or "",
             graph_version=env.get("IG_GRAPH_VERSION") or "v23.0",
             frontend_dist=Path(env["FRONTEND_DIST"]) if env.get("FRONTEND_DIST") else None,
         )
