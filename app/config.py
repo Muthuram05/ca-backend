@@ -22,6 +22,8 @@ class Settings:
     # Meta App Dashboard > Instagram > API setup with Instagram login
     ig_app_id: str
     ig_app_secret: str
+    # Facebook Login for Business configuration; replaces the scope list
+    ig_config_id: str
     # Any random string; the same value goes into the webhook config in the Meta dashboard
     webhook_verify_token: str
     # Signs the login cookie
@@ -48,6 +50,7 @@ class Settings:
             "BASE_URL",
             "IG_APP_ID",
             "IG_APP_SECRET",
+            "IG_CONFIG_ID",
             "WEBHOOK_VERIFY_TOKEN",
             "SESSION_SECRET",
             "TOKEN_ENCRYPTION_KEY",
@@ -60,6 +63,7 @@ class Settings:
             base_url=env["BASE_URL"].rstrip("/"),
             ig_app_id=env["IG_APP_ID"],
             ig_app_secret=env["IG_APP_SECRET"],
+            ig_config_id=env["IG_CONFIG_ID"],
             webhook_verify_token=env["WEBHOOK_VERIFY_TOKEN"],
             session_secret=env["SESSION_SECRET"],
             token_encryption_key=env["TOKEN_ENCRYPTION_KEY"],

@@ -52,6 +52,7 @@ def test_settings_from_env():
         "BASE_URL": "https://x.test/",
         "IG_APP_ID": "1",
         "IG_APP_SECRET": "2",
+        "IG_CONFIG_ID": "cfg",
         "WEBHOOK_VERIFY_TOKEN": "3",
         "SESSION_SECRET": "4",
         "TOKEN_ENCRYPTION_KEY": "5",

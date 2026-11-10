@@ -5,15 +5,19 @@ from conftest import APP_SCOPED_ID, IG_USER_ID, login, make_rule
 from test_security_config import signed_request
 
 
-def test_login_redirects_to_instagram_with_scopes_and_state(client):
+def test_login_redirects_to_facebook_with_config_and_state(client):
+    # Facebook Login for Business: the configuration carries the permissions,
+    # so the dialog takes a config_id instead of a scope list.
     res = client.get("/auth/instagram", follow_redirects=False)
     assert res.status_code == 303
     url = urlparse(res.headers["location"])
     params = parse_qs(url.query)
-    assert url.netloc == "www.instagram.com"
+    assert url.netloc == "www.facebook.com"
+    assert url.path == "/dialog/oauth"
     assert params["client_id"] == ["app-id"]
+    assert params["config_id"] == ["config-id"]
     assert params["redirect_uri"] == ["https://reeldm.test/auth/instagram/callback"]
-    assert "instagram_business_manage_messages" in params["scope"][0]
+    assert "scope" not in params
     assert len(params["state"][0]) > 20
 
 
@@ -24,7 +28,7 @@ def test_successful_login_stores_encrypted_token_and_logs_in(client, ig_mock, ct
 
     # Code is sent without Instagram's trailing "#_"
     exchange = ig_mock.calls[0].request
-    assert b"code=the-code&" in exchange.content or exchange.content.endswith(b"code=the-code")
+    assert "code=the-code" in str(exchange.url)
 
     me = client.get("/api/me").json()
     assert me["username"] == "creator"
@@ -32,7 +36,9 @@ def test_successful_login_stores_encrypted_token_and_logs_in(client, ig_mock, ct
 
     with ctx.sessions() as db:
         account = db.get(Account, IG_USER_ID)
-        assert account.app_scoped_id == APP_SCOPED_ID
+        # Facebook Login returns a single id for the account, so there is no
+        # separate app-scoped id to store.
+        assert account.app_scoped_id is None
         assert "long-token" not in account.access_token_encrypted
         assert ctx.cipher.decrypt(account.access_token_encrypted) == "long-token"
 
@@ -70,7 +76,7 @@ def test_callback_handles_user_cancel(client):
 
 
 def test_callback_handles_instagram_error(client, ig_mock):
-    ig_mock.post("https://api.instagram.com/oauth/access_token").respond(
+    ig_mock.get("https://graph.facebook.com/v23.0/oauth/access_token").respond(
         400, json={"error_type": "OAuthException", "code": 400, "error_message": "Invalid code"}
     )
     start = client.get("/auth/instagram", follow_redirects=False)
@@ -87,8 +93,8 @@ def test_logout(logged_in):
 
 def test_data_deletion_callback_removes_everything(logged_in, ctx):
     make_rule(logged_in)
-    # Meta may identify the user by the app-scoped id
-    req = signed_request("app-secret", {"user_id": APP_SCOPED_ID})
+    # Facebook Login returns one id for the account, so that is what Meta sends
+    req = signed_request("app-secret", {"user_id": IG_USER_ID})
     res = logged_in.post("/auth/instagram/data-deletion", data={"signed_request": req})
     assert res.status_code == 200
     body = res.json()

@@ -19,7 +19,7 @@ from app.instagram import InstagramClient
 from app.main import create_app
 from app.models import Base
 
-GRAPH = "https://graph.instagram.com/v23.0"
+GRAPH = "https://graph.facebook.com/v23.0"
 IG_USER_ID = "17841400000000001"
 APP_SCOPED_ID = "9876543210"
 
@@ -42,6 +42,7 @@ def settings(database_url, tmp_path):
         base_url="https://reeldm.test",
         ig_app_id="app-id",
         ig_app_secret="app-secret",
+        ig_config_id="config-id",
         webhook_verify_token="verify-me",
         session_secret="session-secret",
         token_encryption_key=Fernet.generate_key().decode(),
@@ -75,26 +76,28 @@ def ctx(app):
 
 
 def mock_login(ig_mock, *, token="long-token", user_id=IG_USER_ID, username="creator", subscribe_ok=True):
-    ig_mock.post("https://api.instagram.com/oauth/access_token").respond(
-        json={"access_token": "short-token", "user_id": user_id}
-    )
-    ig_mock.get("https://graph.instagram.com/access_token").respond(
+    # Both the code exchange and the long-lived exchange hit the same endpoint,
+    # distinguished by grant_type; respx replays the first matching route.
+    ig_mock.get(f"{GRAPH}/oauth/access_token").respond(
         json={"access_token": token, "token_type": "bearer", "expires_in": 5184000}
     )
-    ig_mock.get(f"{GRAPH}/me").respond(
+    # The account is granted directly as a business asset.
+    ig_mock.get(f"{GRAPH}/me/assigned_instagram_accounts").respond(
         json={
-            "id": APP_SCOPED_ID,
-            "user_id": user_id,
-            "username": username,
-            "name": "Creator Name",
-            "profile_picture_url": "https://cdn.test/pic.jpg",
-            "account_type": "MEDIA_CREATOR",
+            "data": [
+                {
+                    "id": user_id,
+                    "username": username,
+                    "name": "Creator Name",
+                    "profile_picture_url": "https://cdn.test/pic.jpg",
+                }
+            ]
         }
     )
     if subscribe_ok:
-        ig_mock.post(f"{GRAPH}/me/subscribed_apps").respond(json={"success": True})
+        ig_mock.post(f"{GRAPH}/{user_id}/subscribed_apps").respond(json={"success": True})
     else:
-        ig_mock.post(f"{GRAPH}/me/subscribed_apps").respond(
+        ig_mock.post(f"{GRAPH}/{user_id}/subscribed_apps").respond(
             400, json={"error": {"message": "Missing permission", "code": 10}}
         )
 

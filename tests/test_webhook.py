@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 
 from app.models import Account, Activity, ProcessedComment, Rule, utcnow
-from app.services import cleanup_old_rows, refresh_expiring_tokens
+from app.services import as_utc, cleanup_old_rows, refresh_expiring_tokens
 from conftest import GRAPH, IG_USER_ID, make_rule
 
 
@@ -165,15 +165,14 @@ def test_refresh_expiring_tokens(logged_in, ig_mock, ctx):
     with ctx.sessions() as db:
         db.get(Account, IG_USER_ID).token_expires_at = now + timedelta(days=3)
         db.commit()
-    route = ig_mock.get("https://graph.instagram.com/refresh_access_token").respond(
-        json={"access_token": "refreshed", "expires_in": 5184000}
-    )
+    # System-user tokens never expire, so refreshing makes no API call and
+    # simply pushes the recorded expiry back out of range.
     assert refresh_expiring_tokens(ctx, now) == 1
-    assert route.calls.last.request.url.params["access_token"] == "long-token"
     with ctx.sessions() as db:
         account = db.get(Account, IG_USER_ID)
-        assert ctx.cipher.decrypt(account.access_token_encrypted) == "refreshed"
-    # Fresh token is not refreshed again
+        assert ctx.cipher.decrypt(account.access_token_encrypted) == "long-token"
+        assert as_utc(account.token_expires_at) > now + timedelta(days=365)
+    # Nothing is near expiry any more
     assert refresh_expiring_tokens(ctx, now) == 0
 
 

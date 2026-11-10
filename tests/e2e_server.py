@@ -31,6 +31,7 @@ def build_app():
         base_url=BASE_URL,
         ig_app_id="e2e-app",
         ig_app_secret=WEBHOOK_SECRET,
+        ig_config_id="config-id",
         webhook_verify_token="e2e-verify",
         session_secret="e2e-session",
         token_encryption_key=Fernet.generate_key().decode(),

@@ -1,6 +1,12 @@
-"""Client for the "Instagram API with Instagram Login".
+"""Client for the "Instagram API with Facebook Login" (Unified login).
 
-Docs: https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login
+Meta stopped offering "API setup with Instagram login" to apps created from
+late October 2026, so this app is configured as Facebook Login for Business:
+login goes through facebook.com/dialog/oauth with a config_id, the token is a
+system-user token that does not expire, and every call goes to
+graph.facebook.com rather than graph.instagram.com.
+
+Docs: https://developers.facebook.com/docs/facebook-login/facebook-login-for-business
 """
 
 from urllib.parse import urlencode
@@ -9,10 +15,12 @@ import httpx
 
 from .config import Settings
 
+# The permissions the Facebook Login for Business configuration actually grants.
+# The instagram_business_* names belong to Instagram Login and are rejected here.
 SCOPES = [
-    "instagram_business_basic",
-    "instagram_business_manage_comments",
-    "instagram_business_manage_messages",
+    "instagram_basic",
+    "instagram_manage_comments",
+    "instagram_manage_messages",
 ]
 
 
@@ -27,7 +35,7 @@ class InstagramClient:
     def __init__(self, settings: Settings, http: httpx.Client | None = None):
         self.settings = settings
         self.http = http or httpx.Client(timeout=15)
-        self.graph = f"https://graph.instagram.com/{settings.graph_version}"
+        self.graph = f"https://graph.facebook.com/{settings.graph_version}"
 
     def _request(self, method: str, url: str, **kwargs) -> dict:
         try:
@@ -51,73 +59,128 @@ class InstagramClient:
     # ---------- Login ----------
 
     def authorize_url(self, state: str) -> str:
+        # config_id replaces scope: the configuration in the app dashboard decides
+        # which permissions and business assets are requested.
         params = {
             "client_id": self.settings.ig_app_id,
+            "config_id": self.settings.ig_config_id,
             "redirect_uri": self.settings.redirect_uri,
             "response_type": "code",
-            "scope": ",".join(SCOPES),
+            "override_default_response_type": "true",
             "state": state,
         }
-        return f"https://www.instagram.com/oauth/authorize?{urlencode(params)}"
+        return f"https://www.facebook.com/dialog/oauth?{urlencode(params)}"
 
     def exchange_code(self, code: str) -> dict:
-        """Authorization code -> short-lived token (valid 1 hour)."""
+        """Authorization code -> access token."""
         return self._request(
-            "POST",
-            "https://api.instagram.com/oauth/access_token",
-            data={
+            "GET",
+            f"{self.graph}/oauth/access_token",
+            params={
                 "client_id": self.settings.ig_app_id,
                 "client_secret": self.settings.ig_app_secret,
-                "grant_type": "authorization_code",
                 "redirect_uri": self.settings.redirect_uri,
                 "code": code,
             },
         )
 
     def get_long_lived_token(self, short_token: str) -> dict:
-        """Short-lived -> long-lived token (valid 60 days). Returns access_token, expires_in."""
-        return self._request(
-            "GET",
-            "https://graph.instagram.com/access_token",
-            params={
-                "grant_type": "ig_exchange_token",
-                "client_secret": self.settings.ig_app_secret,
-                "access_token": short_token,
-            },
-        )
+        """Exchange for a long-lived token where the app issues one.
+
+        This configuration issues a system-user token that never expires, in
+        which case the exchange is unnecessary and may be refused; the original
+        token is then returned unchanged with no expiry.
+        """
+        try:
+            body = self._request(
+                "GET",
+                f"{self.graph}/oauth/access_token",
+                params={
+                    "grant_type": "fb_exchange_token",
+                    "client_id": self.settings.ig_app_id,
+                    "client_secret": self.settings.ig_app_secret,
+                    "fb_exchange_token": short_token,
+                },
+            )
+        except InstagramError:
+            return {"access_token": short_token, "expires_in": 0}
+        body.setdefault("access_token", short_token)
+        return body
 
     def refresh_token(self, long_token: str) -> dict:
-        """Extends a long-lived token by another 60 days (token must be at least 24h old)."""
-        return self._request(
-            "GET",
-            "https://graph.instagram.com/refresh_access_token",
-            params={"grant_type": "ig_refresh_token", "access_token": long_token},
-        )
+        """System-user tokens do not expire, so there is nothing to refresh."""
+        return {"access_token": long_token, "expires_in": 0}
 
     # ---------- Account ----------
 
+    IG_FIELDS = "id,username,name,profile_picture_url"
+
+    def _try(self, probes: list, path: str, token: str, **params) -> dict | None:
+        """Run one discovery probe, recording the outcome instead of raising."""
+        try:
+            body = self._request("GET", f"{self.graph}/{path}", params={"access_token": token, **params})
+        except InstagramError as exc:
+            probes.append(f"{path} -> error: {exc}")
+            return None
+        probes.append(f"{path} -> {str(body)[:200]}")
+        return body
+
     def get_profile(self, token: str) -> dict:
-        return self._request(
-            "GET",
-            f"{self.graph}/me",
-            params={
-                "fields": "id,user_id,username,name,profile_picture_url,account_type",
-                "access_token": token,
-            },
+        """Find the Instagram account this token was granted.
+
+        Facebook Login for Business hands back a token scoped to business assets
+        rather than to the Instagram user, so the account has to be discovered.
+        Which edge carries it depends on whether the Instagram account was
+        granted directly or through a linked Page, so both are tried; if neither
+        works the error carries what each probe returned, because a failure here
+        is only diagnosable from the live response.
+        """
+        probes: list[str] = []
+
+        # Granted directly as a business asset.
+        body = self._try(probes, "me/assigned_instagram_accounts", token, fields=self.IG_FIELDS)
+        accounts = (body or {}).get("data") or []
+        if accounts:
+            return accounts[0]
+
+        # Reached through a linked Facebook Page.
+        body = self._try(
+            probes, "me/accounts", token,
+            fields=f"instagram_business_account{{{self.IG_FIELDS}}}",
+        )
+        for page in (body or {}).get("data") or []:
+            account = page.get("instagram_business_account")
+            if account:
+                return account
+
+        # Owned by a business the token can see.
+        businesses = self._try(probes, "me/businesses", token, fields="id,name")
+        for business in (businesses or {}).get("data") or []:
+            owned = self._try(
+                probes, f"{business['id']}/instagram_accounts", token, fields=self.IG_FIELDS
+            )
+            accounts = (owned or {}).get("data") or []
+            if accounts:
+                return accounts[0]
+
+        # Last resort: the token's own subject, in case it is the account.
+        body = self._try(probes, "me", token, fields="id,name")
+        raise InstagramError(
+            "Could not find an Instagram account for this login. Probes: " + " | ".join(probes)
         )
 
-    def subscribe_to_webhooks(self, token: str) -> dict:
+    def subscribe_to_webhooks(self, token: str, ig_user_id: str) -> dict:
         """Ask Instagram to send this account's comment events to our webhook."""
         return self._request(
             "POST",
-            f"{self.graph}/me/subscribed_apps",
+            f"{self.graph}/{ig_user_id}/subscribed_apps",
             params={"subscribed_fields": "comments", "access_token": token},
         )
 
-    def list_media(self, token: str, limit: int = 30) -> list[dict]:
+    def list_media(self, token: str, ig_user_id: str, limit: int = 30) -> list[dict]:
         body = self._request(
             "GET",
-            f"{self.graph}/me/media",
+            f"{self.graph}/{ig_user_id}/media",
             params={
                 "fields": "id,caption,media_type,media_product_type,thumbnail_url,media_url,permalink,timestamp",
                 "limit": limit,
