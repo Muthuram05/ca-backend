@@ -38,11 +38,12 @@ class Settings:
     # Fernet key used to encrypt Instagram access tokens at rest
     token_encryption_key: str
     database_url: str
-    # Optional. The login only grants Instagram permissions, never business_management,
-    # so me/businesses is refused and the owning portfolio cannot be discovered from the
-    # token. Naming it here lets the account be found through the business instead.
+    # Only useful once business_management is granted: without it every edge on a
+    # business is refused with (#200), so naming the portfolio buys nothing.
     ig_business_id: str = ""
-    # Optional last resort: the Instagram user id to use when no probe finds one.
+    # The Instagram account this app manages. Required in practice — see "Finding the
+    # account" in the README: the login returns a system-user token, and no edge
+    # reachable with Instagram-only permissions leads from it back to the account.
     ig_user_id: str = ""
     graph_version: str = "v23.0"
     # Optional: folder with a built ca-frontend (npm run build) to serve from this same app

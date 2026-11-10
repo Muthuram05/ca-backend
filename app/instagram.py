@@ -142,11 +142,13 @@ class InstagramClient:
         Facebook Login for Business hands back a token scoped to business assets
         rather than to the Instagram user, so the account has to be discovered,
         and which edge carries it depends on how the account was granted. The
-        unified-login configuration can only request Instagram permissions, so
-        me/businesses is refused and the owning portfolio is invisible to the
-        token; settings.ig_business_id names it instead. Every probe is recorded
-        and reported on failure, because this step is only diagnosable from the
-        live response.
+        In practice only settings.ig_user_id gets there: the unified-login
+        configuration can request Instagram permissions but not
+        business_management, so me/businesses is refused and every edge on a
+        named business returns (#200). The earlier probes are kept because they
+        are the documented routes and will start working the day that permission
+        is granted. Every probe is recorded and reported on failure, because this
+        step is only diagnosable from the live response.
         """
         probes: list[str] = []
 

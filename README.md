@@ -44,11 +44,42 @@ and `ngrok http 5173`. Put the ngrok **https** URL in `BASE_URL` and open that U
 | `BASE_URL` | Public URL of the **frontend** (ngrok URL locally, Netlify URL in production) |
 | `IG_APP_ID`, `IG_APP_SECRET` | Meta app → App settings → Basic |
 | `IG_CONFIG_ID` | Meta app → Instagram → API setup with Unified login → Configuration ID |
+| `IG_USER_ID` | **Required today** — the Instagram account's id. See *Finding the account*, below |
+| `IG_BUSINESS_ID` | Optional; only useful once `business_management` is granted |
 | `WEBHOOK_VERIFY_TOKEN` | Any random string; enter the same in Meta's webhook settings |
 | `SESSION_SECRET` | `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `TOKEN_ENCRYPTION_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` (keep it safe) |
 | `DATABASE_URL` | Supabase → **Connect** → **Transaction pooler** URI (port 6543) + `?sslmode=require` |
 | `FRONTEND_DIST` | Optional: path to a built ca-frontend, to serve both from this one app |
+
+## Finding the account
+
+The login returns a token for a **system user**, not for the Instagram account, so
+the account has to be discovered afterwards. On this app none of the usual routes
+work, which a live login proved:
+
+```
+me/assigned_instagram_accounts       -> {'data': []}
+me/accounts                          -> {'data': []}
+me/businesses                        -> (#100) Missing Permission
+{business}/owned_instagram_accounts  -> (#200) Requires business_management
+{business}/client_instagram_accounts -> (#200) Requires business_management
+{business}/instagram_accounts        -> (#200) Requires business_management
+me  -> {'id': '...', 'name': 'StillTyping System User'}
+```
+
+Every business edge wants `business_management`, and the unified-login
+configuration cannot request it: its permission list offers only the Instagram and
+ads scopes. Granting it needs App Review, as a Tech Provider.
+
+So the account id is configured outright, in `IG_USER_ID`. Meta Business Suite →
+Settings → Instagram accounts; the business id is in that page's URL as
+`business_id`.
+
+**This makes the deployment single-account.** A second business signing in would
+get its own system user, and the same dead ends. Serving other businesses means
+App Review for `business_management` — at which point `IG_BUSINESS_ID` starts
+working and `IG_USER_ID` can go.
 
 ## Deploy free on Render
 
