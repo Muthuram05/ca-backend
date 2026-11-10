@@ -91,6 +91,9 @@ def connect_account(ctx: AppContext, code: str) -> Account:
     token = long["access_token"]
     profile = ctx.ig.get_profile(token)
     ig_user_id = str(profile.get("user_id") or profile["id"])
+    # The account is discovered by probing several Graph edges, so record which identity
+    # came back. Never log the token itself.
+    log.info("Instagram login resolved @%s (%s)", profile.get("username"), ig_user_id)
 
     webhook_error = None
     try:
