@@ -3,6 +3,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+# The Facebook Login for Business configuration this app logs in through.
+# Not a secret: it travels in the query string of every login URL. Override
+# with IG_CONFIG_ID when pointing the backend at a different Meta app.
+DEFAULT_IG_CONFIG_ID = "28213409225000127"
+
+
 class ConfigError(RuntimeError):
     pass
 
@@ -22,6 +28,9 @@ class Settings:
     # Meta App Dashboard > Instagram > API setup with Instagram login
     ig_app_id: str
     ig_app_secret: str
+    # Facebook Login for Business configuration; replaces the scope list.
+    # from_env() falls back to DEFAULT_IG_CONFIG_ID when the variable is unset.
+    ig_config_id: str
     # Any random string; the same value goes into the webhook config in the Meta dashboard
     webhook_verify_token: str
     # Signs the login cookie
@@ -60,6 +69,7 @@ class Settings:
             base_url=env["BASE_URL"].rstrip("/"),
             ig_app_id=env["IG_APP_ID"],
             ig_app_secret=env["IG_APP_SECRET"],
+            ig_config_id=env.get("IG_CONFIG_ID") or DEFAULT_IG_CONFIG_ID,
             webhook_verify_token=env["WEBHOOK_VERIFY_TOKEN"],
             session_secret=env["SESSION_SECRET"],
             token_encryption_key=env["TOKEN_ENCRYPTION_KEY"],

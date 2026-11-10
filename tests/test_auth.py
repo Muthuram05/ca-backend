@@ -1,19 +1,23 @@
 from urllib.parse import parse_qs, urlparse
 
-from app.models import Account, as_utc, utcnow
-from conftest import APP_SCOPED_ID, IG_USER_ID, login, make_rule, mock_login
+from app.models import Account
+from conftest import APP_SCOPED_ID, IG_USER_ID, login, make_rule
 from test_security_config import signed_request
 
 
-def test_login_redirects_to_instagram_with_scopes_and_state(client):
+def test_login_redirects_to_facebook_with_config_and_state(client):
+    # Facebook Login for Business: the configuration carries the permissions,
+    # so the dialog takes a config_id instead of a scope list.
     res = client.get("/auth/instagram", follow_redirects=False)
     assert res.status_code == 303
     url = urlparse(res.headers["location"])
     params = parse_qs(url.query)
-    assert url.netloc == "www.instagram.com"
+    assert url.netloc == "www.facebook.com"
+    assert url.path == "/dialog/oauth"
     assert params["client_id"] == ["app-id"]
+    assert params["config_id"] == ["config-id"]
     assert params["redirect_uri"] == ["https://reeldm.test/auth/instagram/callback"]
-    assert "instagram_business_manage_messages" in params["scope"][0]
+    assert "scope" not in params
     assert len(params["state"][0]) > 20
 
 
@@ -24,7 +28,7 @@ def test_successful_login_stores_encrypted_token_and_logs_in(client, ig_mock, ct
 
     # Code is sent without Instagram's trailing "#_"
     exchange = ig_mock.calls[0].request
-    assert b"code=the-code&" in exchange.content or exchange.content.endswith(b"code=the-code")
+    assert "code=the-code" in str(exchange.url)
 
     me = client.get("/api/me").json()
     assert me["username"] == "creator"
@@ -32,7 +36,9 @@ def test_successful_login_stores_encrypted_token_and_logs_in(client, ig_mock, ct
 
     with ctx.sessions() as db:
         account = db.get(Account, IG_USER_ID)
-        assert account.app_scoped_id == APP_SCOPED_ID
+        # Facebook Login returns a single id for the account, so there is no
+        # separate app-scoped id to store.
+        assert account.app_scoped_id is None
         assert "long-token" not in account.access_token_encrypted
         assert ctx.cipher.decrypt(account.access_token_encrypted) == "long-token"
 
@@ -46,53 +52,6 @@ def test_login_again_updates_the_same_account(client, ig_mock, ctx):
         assert len(accounts) == 1
         assert accounts[0].username == "renamed"
         assert ctx.cipher.decrypt(accounts[0].access_token_encrypted) == "second"
-
-
-def test_login_keeps_business_login_token_when_exchange_is_unsupported(client, ig_mock, ctx):
-    """Business Login can return a long-lived token already; Instagram then rejects ig_exchange_token."""
-    mock_login(ig_mock)
-    unsupported = {"error": {"message": "Unsupported request - method type: get", "type": "IGApiException", "code": 100}}
-    ig_mock.get("https://graph.instagram.com/access_token").respond(400, json=unsupported)
-    ig_mock.get("https://graph.instagram.com/refresh_access_token").respond(
-        400, json={"error": {"message": "Session has not been active long enough", "code": 190}}
-    )
-    res = client.get("/auth/instagram", follow_redirects=False)
-    state = parse_qs(urlparse(res.headers["location"]).query)["state"][0]
-    res = client.get(f"/auth/instagram/callback?code=the-code%23_&state={state}", follow_redirects=False)
-    assert res.headers["location"] == "/"
-    assert client.get("/api/me").json()["username"] == "creator"
-    with ctx.sessions() as db:
-        account = db.get(Account, IG_USER_ID)
-        assert ctx.cipher.decrypt(account.access_token_encrypted) == "short-token"
-        days_left = (as_utc(account.token_expires_at) - utcnow()).days
-        assert 58 <= days_left <= 60
-
-
-def test_login_uses_refresh_expiry_when_exchange_is_unsupported(client, ig_mock, ctx):
-    mock_login(ig_mock)
-    unsupported = {"error": {"message": "Unsupported request - method type: get", "type": "IGApiException", "code": 100}}
-    ig_mock.get("https://graph.instagram.com/access_token").respond(400, json=unsupported)
-    ig_mock.get("https://graph.instagram.com/refresh_access_token").respond(
-        json={"access_token": "refreshed-token", "token_type": "bearer", "expires_in": 3600 * 24 * 30}
-    )
-    res = client.get("/auth/instagram", follow_redirects=False)
-    state = parse_qs(urlparse(res.headers["location"]).query)["state"][0]
-    client.get(f"/auth/instagram/callback?code=the-code&state={state}", follow_redirects=False)
-    with ctx.sessions() as db:
-        account = db.get(Account, IG_USER_ID)
-        assert ctx.cipher.decrypt(account.access_token_encrypted) == "refreshed-token"
-        assert 29 <= (as_utc(account.token_expires_at) - utcnow()).days <= 30
-
-
-def test_login_fails_on_other_exchange_errors(client, ig_mock):
-    mock_login(ig_mock)
-    ig_mock.get("https://graph.instagram.com/access_token").respond(
-        400, json={"error": {"message": "Error validating client secret", "code": 101}}
-    )
-    res = client.get("/auth/instagram", follow_redirects=False)
-    state = parse_qs(urlparse(res.headers["location"]).query)["state"][0]
-    res = client.get(f"/auth/instagram/callback?code=the-code&state={state}", follow_redirects=False)
-    assert "Error%20validating%20client%20secret" in res.headers["location"]
 
 
 def test_webhook_subscription_failure_still_logs_in_with_warning(client, ig_mock):
@@ -117,7 +76,7 @@ def test_callback_handles_user_cancel(client):
 
 
 def test_callback_handles_instagram_error(client, ig_mock):
-    ig_mock.post("https://api.instagram.com/oauth/access_token").respond(
+    ig_mock.get("https://graph.facebook.com/v23.0/oauth/access_token").respond(
         400, json={"error_type": "OAuthException", "code": 400, "error_message": "Invalid code"}
     )
     start = client.get("/auth/instagram", follow_redirects=False)
@@ -134,8 +93,8 @@ def test_logout(logged_in):
 
 def test_data_deletion_callback_removes_everything(logged_in, ctx):
     make_rule(logged_in)
-    # Meta may identify the user by the app-scoped id
-    req = signed_request("app-secret", {"user_id": APP_SCOPED_ID})
+    # Facebook Login returns one id for the account, so that is what Meta sends
+    req = signed_request("app-secret", {"user_id": IG_USER_ID})
     res = logged_in.post("/auth/instagram/data-deletion", data={"signed_request": req})
     assert res.status_code == 200
     body = res.json()

@@ -135,7 +135,7 @@ def delete_account(request: Request, account: Account = Depends(current_account)
 @router.get("/media")
 def media(account: Account = Depends(current_account), ctx: AppContext = Depends(get_ctx)):
     try:
-        return ctx.ig.list_media(ctx.cipher.decrypt(account.access_token_encrypted))
+        return ctx.ig.list_media(ctx.cipher.decrypt(account.access_token_encrypted), account.ig_user_id)
     except (InstagramError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"Could not load your reels: {exc}") from exc
 

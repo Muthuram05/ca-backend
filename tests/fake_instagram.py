@@ -34,7 +34,7 @@ class FakeInstagram:
         return {"access_token": "short", "user_id": FAKE_IG_USER_ID}
 
     def get_long_lived_token(self, short_token: str) -> dict:
-        return {"access_token": "fake-long-token", "expires_in": 60 * 24 * 3600}
+        return {"access_token": "fake-long-token", "expires_in": 0}
 
     def refresh_token(self, long_token: str) -> dict:
         return {"access_token": "fake-long-token", "expires_in": 60 * 24 * 3600}
@@ -42,10 +42,10 @@ class FakeInstagram:
     def get_profile(self, token: str) -> dict:
         return {"id": "555", "user_id": FAKE_IG_USER_ID, "username": "demo.creator", "name": "Demo Creator"}
 
-    def subscribe_to_webhooks(self, token: str) -> dict:
+    def subscribe_to_webhooks(self, token: str, ig_user_id: str) -> dict:
         return {"success": True}
 
-    def list_media(self, token: str, limit: int = 30) -> list[dict]:
+    def list_media(self, token: str, ig_user_id: str, limit: int = 30) -> list[dict]:
         return self.media
 
     def send_private_reply(self, token: str, ig_user_id: str, comment_id: str, text: str) -> dict:

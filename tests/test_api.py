@@ -96,7 +96,7 @@ def test_comment_tester(logged_in):
 
 
 def test_media_list(logged_in, ig_mock):
-    route = ig_mock.get(f"{GRAPH}/me/media").respond(
+    route = ig_mock.get(f"{GRAPH}/{IG_USER_ID}/media").respond(
         json={"data": [{"id": "reel1", "media_product_type": "REELS", "timestamp": "2026-10-01T00:00:00+0000"}]}
     )
     assert logged_in.get("/api/media").json()[0]["id"] == "reel1"
@@ -104,7 +104,7 @@ def test_media_list(logged_in, ig_mock):
 
 
 def test_media_error_is_reported(logged_in, ig_mock):
-    ig_mock.get(f"{GRAPH}/me/media").respond(400, json={"error": {"message": "Token expired"}})
+    ig_mock.get(f"{GRAPH}/{IG_USER_ID}/media").respond(400, json={"error": {"message": "Token expired"}})
     res = logged_in.get("/api/media")
     assert res.status_code == 502
     assert "Token expired" in res.json()["detail"]
@@ -125,7 +125,7 @@ def test_activity_newest_first_and_stats(logged_in, ctx):
 
 def test_resubscribe(client, ig_mock):
     login(client, ig_mock, subscribe_ok=False)
-    ig_mock.post(f"{GRAPH}/me/subscribed_apps").respond(json={"success": True})
+    ig_mock.post(f"{GRAPH}/{IG_USER_ID}/subscribed_apps").respond(json={"success": True})
     me = client.post("/api/account/resubscribe").json()
     assert me["webhook_subscribed"] is True
     assert me["webhook_error"] is None

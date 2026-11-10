@@ -42,7 +42,8 @@ and `ngrok http 5173`. Put the ngrok **https** URL in `BASE_URL` and open that U
 | Variable | Value |
 | --- | --- |
 | `BASE_URL` | Public URL of the **frontend** (ngrok URL locally, Netlify URL in production) |
-| `IG_APP_ID`, `IG_APP_SECRET` | Meta app → Instagram → API setup with Instagram login |
+| `IG_APP_ID`, `IG_APP_SECRET` | Meta app → App settings → Basic |
+| `IG_CONFIG_ID` | Meta app → Instagram → API setup with Unified login → Configuration ID |
 | `WEBHOOK_VERIFY_TOKEN` | Any random string; enter the same in Meta's webhook settings |
 | `SESSION_SECRET` | `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `TOKEN_ENCRYPTION_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` (keep it safe) |
@@ -68,8 +69,13 @@ and `ngrok http 5173`. Put the ngrok **https** URL in `BASE_URL` and open that U
 | Data deletion callback | `https://FRONTEND_URL/auth/instagram/data-deletion` |
 | Deauthorize callback | `https://FRONTEND_URL/auth/instagram/deauthorize` |
 
-Permissions: `instagram_business_basic`, `instagram_business_manage_comments`,
-`instagram_business_manage_messages`. Until **App Review** approves them, only accounts added as
+Login uses **Facebook Login for Business** (Unified login): Meta stopped offering
+"API setup with Instagram login" to apps created from late October 2026. The
+dialog takes a `config_id` instead of a scope list, the token is a system-user
+token that never expires, and all calls go to `graph.facebook.com`.
+
+Permissions: `instagram_basic`, `instagram_manage_comments`,
+`instagram_manage_messages`. Until **App Review** approves them, only accounts added as
 Instagram Testers can log in. Users need a Business or Creator account.
 
 ## Tests

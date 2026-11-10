@@ -6,7 +6,7 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from app.config import ConfigError, Settings, normalize_database_url
+from app.config import DEFAULT_IG_CONFIG_ID, ConfigError, Settings, normalize_database_url
 from app.security import TokenCipher, parse_signed_request, verify_webhook_signature
 
 
@@ -59,6 +59,9 @@ def test_settings_from_env():
     }
     s = Settings.from_env(env)
     assert s.redirect_uri == "https://x.test/auth/instagram/callback"
+    # IG_CONFIG_ID is optional: it is not a secret and has a committed default
+    assert s.ig_config_id == DEFAULT_IG_CONFIG_ID
+    assert Settings.from_env({**env, "IG_CONFIG_ID": "override"}).ig_config_id == "override"
     assert s.cookie_secure
     assert s.database_url.startswith("postgresql+psycopg://")
     with pytest.raises(ConfigError, match="IG_APP_SECRET"):

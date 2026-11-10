@@ -84,59 +84,36 @@ def handle_comment(ctx: AppContext, ig_user_id: str, comment: dict) -> None:
         db.commit()
 
 
-LONG_LIVED_TOKEN_SECONDS = 60 * 24 * 3600
-
-
-def _long_lived_token(ctx: AppContext, token: str) -> dict:
-    """Returns {"access_token", "expires_in"} for a token from Instagram login.
-
-    Business Login for Instagram may already return a long-lived token. Instagram then
-    rejects ig_exchange_token with code 100 "Unsupported request", so we keep the token we
-    have. If it turns out to be short-lived, get_profile() right after fails or the user
-    simply has to log in again; the daily refresh job extends it otherwise.
-    """
-    try:
-        return ctx.ig.get_long_lived_token(token)
-    except InstagramError as exc:
-        if not exc.is_unsupported_request:
-            raise
-    try:
-        # Confirms the token is long-lived and gives the real expiry (only works once it's 24h old)
-        return ctx.ig.refresh_token(token)
-    except InstagramError as exc:
-        log.info("Login token is not refreshable yet (%s); using it as the long-lived token", exc)
-    return {"access_token": token, "expires_in": LONG_LIVED_TOKEN_SECONDS}
-
-
 def connect_account(ctx: AppContext, code: str) -> Account:
     """Finishes Instagram login: code -> long-lived token -> profile -> webhook subscription."""
     short = ctx.ig.exchange_code(code)
-    t = str(short.get("access_token", ""))
-    log.info(
-        "Instagram login: user_id=%s permissions=%s token_prefix=%s token_len=%d",
-        short.get("user_id"), short.get("permissions"), t[:4], len(t),
-    )
-    long = _long_lived_token(ctx, short["access_token"])
+    long = ctx.ig.get_long_lived_token(short["access_token"])
     token = long["access_token"]
     profile = ctx.ig.get_profile(token)
     ig_user_id = str(profile.get("user_id") or profile["id"])
+    # The account is discovered by probing several Graph edges, so record which identity
+    # came back. Never log the token itself.
+    log.info("Instagram login resolved @%s (%s)", profile.get("username"), ig_user_id)
 
     webhook_error = None
     try:
-        ctx.ig.subscribe_to_webhooks(token)
+        ctx.ig.subscribe_to_webhooks(token, ig_user_id)
     except InstagramError as exc:
         log.warning("Webhook subscription failed for %s: %s", profile.get("username"), exc)
         webhook_error = str(exc)
 
     with ctx.sessions() as db:
         account = db.get(Account, ig_user_id) or Account(ig_user_id=ig_user_id, connected_at=utcnow())
-        account.app_scoped_id = str(profile.get("id") or "") or None
+        app_scoped = str(profile.get("id") or "") or None
+        account.app_scoped_id = app_scoped if app_scoped != ig_user_id else None
         account.username = profile.get("username") or ""
         account.name = profile.get("name")
         account.profile_picture_url = profile.get("profile_picture_url")
         account.account_type = profile.get("account_type")
         account.access_token_encrypted = ctx.cipher.encrypt(token)
-        account.token_expires_at = utcnow() + timedelta(seconds=int(long.get("expires_in", 60 * 24 * 3600)))
+        expires_in = int(long.get("expires_in") or 0)
+        # expires_in 0 means a system-user token, which never expires
+        account.token_expires_at = utcnow() + timedelta(seconds=expires_in or 100 * 365 * 24 * 3600)
         account.webhook_subscribed = webhook_error is None
         account.webhook_error = webhook_error
         db.add(account)
@@ -148,7 +125,7 @@ def resubscribe_webhooks(ctx: AppContext, ig_user_id: str) -> Account:
     with ctx.sessions() as db:
         account = db.get(Account, ig_user_id)
         try:
-            ctx.ig.subscribe_to_webhooks(ctx.cipher.decrypt(account.access_token_encrypted))
+            ctx.ig.subscribe_to_webhooks(ctx.cipher.decrypt(account.access_token_encrypted), ig_user_id)
             account.webhook_subscribed, account.webhook_error = True, None
         except (InstagramError, ValueError) as exc:
             account.webhook_subscribed, account.webhook_error = False, str(exc)
@@ -204,7 +181,9 @@ def refresh_expiring_tokens(ctx: AppContext, now: datetime | None = None) -> int
                 log.warning("Token refresh failed for @%s: %s", account.username, exc)
                 continue
             account.access_token_encrypted = ctx.cipher.encrypt(fresh["access_token"])
-            account.token_expires_at = now + timedelta(seconds=int(fresh.get("expires_in", 60 * 24 * 3600)))
+            expires_in = int(fresh.get("expires_in") or 0)
+            # expires_in 0 means a system-user token, which never expires
+            account.token_expires_at = now + timedelta(seconds=expires_in or 100 * 365 * 24 * 3600)
             refreshed += 1
         db.commit()
     return refreshed
