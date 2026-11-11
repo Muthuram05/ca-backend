@@ -1,3 +1,4 @@
+import logging
 from urllib.parse import parse_qs, urlparse
 
 from app.models import Account
@@ -75,14 +76,21 @@ def test_callback_handles_user_cancel(client):
     assert "cancelled" in res.headers["location"]
 
 
-def test_callback_handles_instagram_error(client, ig_mock):
+def test_callback_keeps_instagram_error_detail_out_of_the_url(client, ig_mock, caplog):
     ig_mock.get("https://graph.facebook.com/v23.0/oauth/access_token").respond(
         400, json={"error_type": "OAuthException", "code": 400, "error_message": "Invalid code"}
     )
     start = client.get("/auth/instagram", follow_redirects=False)
     state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
-    res = client.get(f"/auth/instagram/callback?code=bad&state={state}", follow_redirects=False)
-    assert "Invalid%20code" in res.headers["location"]
+    with caplog.at_level(logging.WARNING, logger="reeldm"):
+        res = client.get(f"/auth/instagram/callback?code=bad&state={state}", follow_redirects=False)
+
+    location = res.headers["location"]
+    assert "error=" in location
+    # A failed discovery reports every probe it tried, naming the business and system-user
+    # ids. The person logging in gets a plain message; the detail goes to the logs.
+    assert "Invalid" not in location
+    assert "Invalid code" in caplog.text
     assert client.get("/api/me").status_code == 401
 
 
