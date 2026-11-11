@@ -44,8 +44,10 @@ def callback(
         # Instagram appends "#_" to the code
         account = connect_account(ctx, code.removesuffix("#_"))
     except (InstagramError, KeyError) as exc:
+        # get_profile reports every discovery probe it tried, which names the business and
+        # system-user ids. That belongs in the logs, not in a stranger's address bar.
         log.warning("Instagram login failed: %s", exc)
-        return _home(error=f"Instagram login failed: {exc}")
+        return _home(error="Instagram login failed. Check that you picked a Business or Creator account, then try again.")
 
     request.session.clear()
     request.session["ig_user_id"] = account.ig_user_id
