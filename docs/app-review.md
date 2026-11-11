@@ -178,12 +178,21 @@ service runs in **Oregon (US West)**; Netlify is US-based and proxies `/api`, `/
 business with no legal function, but it is a statement about Zeen Labs, not about the
 code.
 
-## Still to do, and only you can do it
+## Screencast
 
-1. The four **"I agree … in accordance with the allowed usage"** checkboxes, one per
-   permission under Allowed usage.
-2. The **screencast**, uploaded against `instagram_basic`,
-   `instagram_manage_comments` and `instagram_manage_messages`.
-3. The **API test-call counters**, which read `0 of 1` for `instagram_basic` and
-   `instagram_manage_comments` despite the live app having made those calls. Meta says
-   testing data can take 24 hours to appear.
+Recorded in two takes and joined with ffmpeg (`-f concat -c copy`, both clips were
+3456x2234 h264): the login take, then the create-rule / comment / DM take. 74 seconds.
+Re-encoded to 1728x1118 at 24fps for upload, which took it from 55 MB to 1.9 MB with the
+text still sharp. Copies on the Desktop: `reel-dm-screencast-full.mov` (original quality)
+and `reel-dm-screencast-uploaded.mp4` (what Meta has).
+
+It is uploaded against `instagram_basic`, `instagram_manage_comments` and
+`instagram_manage_messages`. The API test-call counters went to **Completed** on their
+own once Meta registered the live app's calls.
+
+## Submitted
+
+Submitted 2026-11-11 for `instagram_basic`, `instagram_manage_comments`,
+`instagram_manage_messages` and `public_profile`. Meta: *"Most submissions are reviewed
+within 20 days."* It can no longer be edited — if it comes back with questions, the reply
+goes through this same submission.
